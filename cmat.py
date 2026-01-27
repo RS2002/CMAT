@@ -11,6 +11,7 @@ from mat.algorithms.utils.transformer_act import continuous_autoregreesive_act
 from mat.algorithms.utils.transformer_act import continuous_parallel_act
 from torch.distributions import Categorical, Normal
 
+Consensus_length = None
 
 class SelfCompression(nn.Module):
     def __init__(self, input_dim, output_dim, da, r):
@@ -217,38 +218,15 @@ class Decoder(nn.Module):
         if self.dec_actor:
             print("Don't support dec_actor.")
             exit()
-            # if self.share_actor:
-            #     print("mac_dec!!!!!")
-            #     self.mlp = nn.Sequential(nn.LayerNorm(obs_dim),
-            #                              init_(nn.Linear(obs_dim, n_embd), activate=True), nn.GELU(), nn.LayerNorm(n_embd),
-            #                              init_(nn.Linear(n_embd, n_embd), activate=True), nn.GELU(), nn.LayerNorm(n_embd),
-            #                              init_(nn.Linear(n_embd, action_dim)))
-            # else:
-            #     self.mlp = nn.ModuleList()
-            #     for n in range(n_agent):
-            #         actor = nn.Sequential(nn.LayerNorm(obs_dim),
-            #                               init_(nn.Linear(obs_dim, n_embd), activate=True), nn.GELU(), nn.LayerNorm(n_embd),
-            #                               init_(nn.Linear(n_embd, n_embd), activate=True), nn.GELU(), nn.LayerNorm(n_embd),
-            #                               init_(nn.Linear(n_embd, action_dim)))
-            #         self.mlp.append(actor)
         else:
-            # # self.agent_id_emb = nn.Parameter(torch.zeros(1, n_agent, n_embd))
-            # if action_type == 'Discrete':
-            #     self.action_encoder = nn.Sequential(init_(nn.Linear(action_dim + 1, n_embd, bias=False), activate=True),
-            #                                         nn.GELU())
-            # else:
-            #     self.action_encoder = nn.Sequential(init_(nn.Linear(action_dim, n_embd), activate=True), nn.GELU())
-            # self.obs_encoder = nn.Sequential(nn.LayerNorm(obs_dim),
-            #                                  init_(nn.Linear(obs_dim, n_embd), activate=True), nn.GELU())
-            # self.ln = nn.LayerNorm(n_embd)
-            # self.blocks = nn.Sequential(*[DecodeBlock(n_embd, n_head, n_agent) for _ in range(n_block)])
-            # self.head = nn.Sequential(init_(nn.Linear(n_embd, n_embd), activate=True), nn.GELU(), nn.LayerNorm(n_embd),
-            #                           init_(nn.Linear(n_embd, action_dim)))
+
+            if Consensus_length is None:
+                self.consensus_len = n_agent
+            else:
+                self.consensus_len = Consensus_length
 
             self.sos = nn.Parameter(torch.randn([1, n_embd]), requires_grad=True)
-
-            # self.compressor = SelfCompression(n_embd, n_embd, n_embd, 4)
-            self.blocks = nn.Sequential(*[DecodeBlock(n_embd, n_head, n_agent) for _ in range(n_block)])
+            self.blocks = nn.Sequential(*[DecodeBlock(n_embd, n_head, self.consensus_len) for _ in range(n_block)])
 
             self.projector = nn.Sequential(nn.LayerNorm(n_embd),
                                            init_(nn.Linear(n_embd, n_embd), activate=True), nn.GELU(),
@@ -259,18 +237,11 @@ class Decoder(nn.Module):
                                       init_(nn.Linear(n_embd, 1)))
             self.softmax = nn.Softmax(dim=1)
 
-            # self.head = nn.ModuleList()
-            # for n in range(n_agent):
-            #     actor = nn.Sequential(nn.LayerNorm(n_embd),
-            #                           init_(nn.Linear(n_embd, n_embd), activate=True), nn.GELU(), nn.LayerNorm(n_embd),
-            #                           init_(nn.Linear(n_embd, n_embd), activate=True), nn.GELU(), nn.LayerNorm(n_embd),
-            #                           init_(nn.Linear(n_embd, action_dim)))
-            #     self.head.append(actor)
             self.head = nn.Sequential(
                 nn.LayerNorm(n_embd * 2),
                 init_(nn.Linear(n_embd * 2, n_embd), activate=True), nn.GELU(), nn.LayerNorm(n_embd),
                 init_(nn.Linear(n_embd, action_dim)))
-            self.pos_emb = get_sinusoidal_pos_emb(n_agent, n_embd)
+            self.pos_emb = get_sinusoidal_pos_emb(self.consensus_len, n_embd)
 
     def zero_std(self, device):
         if self.action_type != 'Discrete':
@@ -286,25 +257,9 @@ class Decoder(nn.Module):
         if self.dec_actor:
             print("Don't support dec_actor.")
             exit()
-            # if self.share_actor:
-            #     logit = self.mlp(obs)
-            # else:
-            #     logit = []
-            #     for n in range(len(self.mlp)):
-            #         logit_n = self.mlp[n](obs[:, n, :])
-            #         logit.append(logit_n)
-            #     logit = torch.stack(logit, dim=1)
         else:
-            # action_embeddings = self.action_encoder(action)
-            # x = self.ln(action_embeddings)
-            # for block in self.blocks:
-            #     x = block(x, obs_rep)
-            # logit = self.head(x)
-
-            # sos = self.compressor(obs_rep)
             sos = prefix
-            # sos = self.sos
-            x_dec = torch.zeros_like(obs_rep)  # TODO: change the length
+            x_dec = torch.zeros([obs_rep.shape[0],self.consensus_len,obs_rep.shape[2]]).to(obs_rep.device)
             x_dec[:, 0, :] = x_dec[:, 0, :] + sos
             x_dec = x_dec + self.pos_emb
 
@@ -323,11 +278,6 @@ class Decoder(nn.Module):
                     x_dec = torch.concat([x_dec[:, :i + 1, :], x[:, i:, :]], dim=1)
                     x = x_dec
 
-            # logit = []
-            # for n in range(len(self.head)):
-            #     logit_n = self.head[n](x[:, -1, :])
-            #     logit.append(logit_n)
-            # logit = torch.stack(logit, dim=1)
 
             weight = self.softmax(self.gate(x).squeeze(-1)).unsqueeze(-1)
             consensus = torch.sum(weight*x,dim=1,keepdim=True)
@@ -380,16 +330,7 @@ class ConsensusMultiAgentTransformer(nn.Module):
         if available_actions is not None:
             available_actions = check(available_actions).to(**self.tpdv)
 
-        batch_size = np.shape(state)[0]
         v_loc, obs_rep, prefix = self.encoder(state, obs)
-
-        # if self.action_type == 'Discrete':
-        #     action = action.long()
-        #     action_log, entropy = discrete_parallel_act(self.decoder, obs_rep, obs, action, batch_size,
-        #                                                 self.n_agent, self.action_dim, self.tpdv, available_actions)
-        # else:
-        #     action_log, entropy = continuous_parallel_act(self.decoder, obs_rep, obs, action, batch_size,
-        #                                                   self.n_agent, self.action_dim, self.tpdv)
 
         if self.action_type == 'Discrete':
             logit = self.decoder(None, obs_rep, None, prefix)
@@ -417,17 +358,7 @@ class ConsensusMultiAgentTransformer(nn.Module):
         if available_actions is not None:
             available_actions = check(available_actions).to(**self.tpdv)
 
-        # batch_size = np.shape(obs)[0]
         v_loc, obs_rep, prefix = self.encoder(state, obs)
-
-        # if self.action_type == "Discrete":
-        #     output_action, output_action_log = discrete_autoregreesive_act(self.decoder, obs_rep, obs, batch_size,
-        #                                                                    self.n_agent, self.action_dim, self.tpdv,
-        #                                                                    available_actions, deterministic)
-        # else:
-        #     output_action, output_action_log = continuous_autoregreesive_act(self.decoder, obs_rep, obs, batch_size,
-        #                                                                      self.n_agent, self.action_dim, self.tpdv,
-        #                                                                      deterministic)
 
         if self.action_type == 'Discrete':
             logit = self.decoder(None, obs_rep, None, prefix)
@@ -457,6 +388,3 @@ class ConsensusMultiAgentTransformer(nn.Module):
         obs = check(obs).to(**self.tpdv)
         v_tot, obs_rep, prefix = self.encoder(state, obs)
         return v_tot
-
-
-
