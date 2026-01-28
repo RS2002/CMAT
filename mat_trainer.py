@@ -135,7 +135,7 @@ class MATTrainer:
                                       dim=-1,
                                       keepdim=True) * active_masks_batch).sum() / active_masks_batch.sum()
         else:
-            policy_loss = -torch.sum(torch.min(surr1, surr2), dim=-1, keepdim=True).mean()
+            policy_loss = -torch.mean(torch.min(surr1, surr2), dim=-1, keepdim=True).mean()
 
         # critic update
         value_loss = self.cal_value_loss(values, value_preds_batch, return_batch, active_masks_batch)
