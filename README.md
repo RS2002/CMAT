@@ -5,6 +5,8 @@
 
 ## 1. Workflow
 
+![](./img/example.png)
+
 ![](./img/main.png)
 
 

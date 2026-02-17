@@ -177,8 +177,6 @@ class Encoder(nn.Module):
         # rep = self.blocks(self.ln(x))
         rep = self.blocks(x)
 
-        # rep = rep + x
-
         prefix = self.compressor(rep)
         # prefix = None
 
@@ -227,21 +225,21 @@ class Decoder(nn.Module):
             else:
                 self.consensus_len = Consensus_length
 
-            self.sos = nn.Parameter(torch.randn([1, n_embd]), requires_grad=True)
-            self.blocks = nn.Sequential(*[DecodeBlock(n_embd, n_head, self.consensus_len) for _ in range(n_block)])
-
-            self.projector = nn.Sequential(nn.LayerNorm(n_embd),
-                                           init_(nn.Linear(n_embd, n_embd), activate=True), nn.GELU(),
-                                           nn.LayerNorm(n_embd),
-                                           init_(nn.Linear(n_embd, n_embd)))
-            self.gate = nn.Sequential(nn.LayerNorm(n_embd),
-                                      init_(nn.Linear(n_embd, n_embd), activate=True), nn.GELU(), nn.LayerNorm(n_embd),
-                                      init_(nn.Linear(n_embd, 1)))
-            self.softmax = nn.Softmax(dim=1)
+            # self.sos = nn.Parameter(torch.randn([1, n_embd]), requires_grad=True)
+            # self.blocks = nn.Sequential(*[DecodeBlock(n_embd, n_head, self.consensus_len) for _ in range(n_block)])
+            #
+            # self.projector = nn.Sequential(nn.LayerNorm(n_embd),
+            #                                init_(nn.Linear(n_embd, n_embd), activate=True), nn.GELU(),
+            #                                nn.LayerNorm(n_embd),
+            #                                init_(nn.Linear(n_embd, n_embd)))
+            # self.gate = nn.Sequential(nn.LayerNorm(n_embd),
+            #                           init_(nn.Linear(n_embd, n_embd), activate=True), nn.GELU(), nn.LayerNorm(n_embd),
+            #                           init_(nn.Linear(n_embd, 1)))
+            # self.softmax = nn.Softmax(dim=1)
 
             self.head = nn.Sequential(
-                nn.LayerNorm(n_embd * 2),
-                init_(nn.Linear(n_embd * 2, n_embd), activate=True), nn.GELU(), nn.LayerNorm(n_embd),
+                nn.LayerNorm(n_embd),
+                init_(nn.Linear(n_embd, n_embd), activate=True), nn.GELU(), nn.LayerNorm(n_embd),
                 init_(nn.Linear(n_embd, action_dim)))
             self.pos_emb = get_sinusoidal_pos_emb(self.consensus_len, n_embd)
 
@@ -260,34 +258,33 @@ class Decoder(nn.Module):
             print("Don't support dec_actor.")
             exit()
         else:
-            sos = prefix
-            x_dec = torch.zeros([obs_rep.shape[0],self.consensus_len,obs_rep.shape[2]]).to(obs_rep.device)
-            x_dec[:, 0, :] = x_dec[:, 0, :] + sos
-            x_dec = x_dec + self.pos_emb
+            # sos = prefix
+            # x_dec = torch.zeros([obs_rep.shape[0],self.consensus_len,obs_rep.shape[2]]).to(obs_rep.device)
+            # x_dec[:, 0, :] = x_dec[:, 0, :] + sos
+            # x_dec = x_dec + self.pos_emb
+            #
+            # for i in range(x_dec.shape[1]):
+            #     x = x_dec
+            #     for block in self.blocks:
+            #         x = block(x, obs_rep)
+            #     x_dec = x_dec - self.pos_emb
+            #
+            #     x = self.projector(x)
+            #
+            #     if i != x_dec.shape[1] - 1:
+            #         x_dec = torch.concat([x_dec[:, :i + 1, :], x[:, i:-1, :]], dim=1)
+            #         x_dec = x_dec + self.pos_emb
+            #     else:
+            #         x_dec = torch.concat([x_dec[:, :i + 1, :], x[:, i:, :]], dim=1)
+            #         x = x_dec
+            #
+            #
+            # weight = self.softmax(self.gate(x).squeeze(-1)).unsqueeze(-1)
+            # consensus = torch.sum(weight*x,dim=1,keepdim=True)
 
-            for i in range(x_dec.shape[1]):
-                x = x_dec
-                # x = x_dec.detach()
-
-                for block in self.blocks:
-                    x = block(x, obs_rep)
-                x_dec = x_dec - self.pos_emb
-
-                x = self.projector(x)
-
-                if i != x_dec.shape[1] - 1:
-                    x_dec = torch.concat([x_dec[:, :i + 1, :], x[:, i:-1, :]], dim=1)
-                    x_dec = x_dec + self.pos_emb
-                else:
-                    x_dec = torch.concat([x_dec[:, :i + 1, :], x[:, i:, :]], dim=1)
-                    x = x_dec
-
-
-            weight = self.softmax(self.gate(x).squeeze(-1)).unsqueeze(-1)
-            consensus = torch.sum(weight*x,dim=1,keepdim=True)
-
-            consensus = consensus.repeat(1, obs_rep.shape[1], 1)
-            logit = self.head(torch.concat([obs_rep, consensus], dim=-1))
+            # consensus = prefix.unsqueeze(1).repeat(1, obs_rep.shape[1], 1)
+            # logit = self.head(torch.concat([obs_rep, consensus], dim=-1))
+            logit = self.head(obs_rep)
 
         return logit
 
